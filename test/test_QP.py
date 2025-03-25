@@ -1,7 +1,7 @@
 #%%
 import numpy as np
 import matplotlib.pyplot as plt
-import sys
+import sys, os
 
 parent = os.path.join(sys.path[0], "../")
 sys.path.append(parent)
@@ -51,15 +51,25 @@ print(f"Dual active set solver solution: {x}")
 
 plt.plot(x_arr[:,0], x_arr[:,1], ls="--", marker="x", color="red", label="Dual active set")
 
-# plt.show()
 
-x, x_arr = model_ineq.primal_dual_active_set(x_0=[0,0], y_0=[], z_0=[1,1,1,1,1], s_0=[1,1,1,1,1])
-print(f"Primal dual active set solver solution: {x}")
-plt.plot(x_arr[:,0], x_arr[:,1], ls="--", marker="x", color="blue", label="Primal dual active set")
+x, x_arr = model_ineq.primal_dual_active_set(x_0=[1,0], y_0=[], z_0=[1,1,1,1,1], s_0=[1,1,1,1,1])
+print(f"Primal Dual solver solution: {x}")
+plt.plot(x_arr[:,0], x_arr[:,1], ls="--", marker="x", color="yellow", label="Primal dual")
+
+x, x_arr = model_ineq.predictor_corr(x_0=[0.1,1], y_0=[], z_0=[1,1,1,1,1], s_0=[1,1,1,1,1])
+print(f"Predictor Corrector solver solution: {x}")
+plt.plot(x_arr[:,0], x_arr[:,1], ls="--", marker="x", color="gray", label="Predictor Corrector")
+
+# print(x_arr)
+
+x, x_arr = model_ineq.primal_dual_predictor_corr(x_0=[2,1], y_0=[], z_0=[1,1,1,1,1], s_0=[1,1,1,1,1])
+print(f"Primal dual Predictor Corrector active set solver solution: {x}")
+plt.plot(x_arr[:,0], x_arr[:,1], ls="--", marker="x", color="blue", label="Primal dual - Predictor corrector")
 plt.legend()
 plt.xlim(-0.5,5)
 plt.ylim(-0.5,5)
 plt.show()
+
 
 # %%
 x = np.linspace(-0.5, 5, 100)

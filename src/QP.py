@@ -35,7 +35,6 @@ class QP:
     self.b_ineq = b_ineq
     self.KKT = np.block([[G, A_eq.T], [A_eq, np.zeros((A_eq.shape[0], A_eq.shape[0]))]])
     
-    
   def q(self, x : float):
     return 0.5 * x.T @ self.G @ x + self.c.T @ x + self.const
   
@@ -80,8 +79,6 @@ class QP:
     fig.tight_layout()
     return fig, ax
 
-      
-  
   def solve_eq(
     self, 
     G = NotImplemented, 
@@ -123,7 +120,6 @@ class QP:
       x = np.linalg.lstsq(M, v, rcond=None)[0]
       return x[:self.c.shape[0]], x[self.c.shape[0]:]
 
-    
   def solve_working_set(
     self, 
     W, 
@@ -170,7 +166,6 @@ class QP:
         print("The working set is not feasible.")
         print(f" W = {W}")
       
-  
   def solve_idiot_active_set(self):
     """
     Solves the quadratic programming problem using the idiot active set method.
@@ -196,7 +191,7 @@ class QP:
             
     return x_best, lam_best, w_best
   
-  def alpha(self, x, p, W):
+  def __alpha(self, x, p, W):
     """
     Computes the step size for the active set method.
     """
@@ -253,7 +248,7 @@ class QP:
           W = np.delete(W, i)
           continue
       else:
-        alpha, W_new = self.alpha(x, pk, W)
+        alpha, W_new = self.__alpha(x, pk, W)
         x = x + alpha * pk
         
         x_arr = np.append(x_arr, [x])
@@ -338,40 +333,192 @@ class QP:
           W = np.delete(W, W[j])      
     return x, np.reshape(x_arr, (-1, self.N))
   
-  def primal_dual_active_set(self, x_0, y_0, z_0, s_0, epsilon = 1e-6):
+  def __make_lin_system(self, rl, ra, rc, rsz, s, z, sigma, mu):
+    M = np.block([
+      [
+        self.G, 
+        -self.A_eq.T, 
+        -self.A_ineq.T, 
+        np.zeros((self.N, self.A_ineq.shape[0]))
+      ],
+      [
+        -self.A_eq, 
+        np.zeros((self.A_eq.shape[0], self.A_eq.shape[0])), 
+        np.zeros((self.A_eq.shape[0], self.A_ineq.shape[0])), 
+        np.zeros((self.A_eq.shape[0], self.A_ineq.shape[0]))
+      ],
+      [
+        -self.A_ineq, 
+        np.zeros((self.A_ineq.shape[0], self.A_eq.shape[0])), 
+        np.zeros((self.A_ineq.shape[0], self.A_ineq.shape[0])), 
+        np.eye(self.A_ineq.shape[0])
+      ],
+      [
+        np.zeros((self.A_ineq.shape[0], self.N)),
+        np.zeros((self.A_ineq.shape[0], self.A_eq.shape[0])), 
+        np.diag(s), 
+        np.diag(z)
+      ]
+    ])
+    
+    vec = np.concatenate([
+      -rl, 
+      -ra, 
+      -rc, 
+      -rsz + sigma * mu * np.ones(self.A_ineq.shape[0])
+    ])
+    
+    return M, vec
+  
+  def __get_residuals(self, x, y, z, s):
+    rl = self.G @ x + self.c - self.A_eq.T @ y - self.A_ineq.T @ z
+    ra = -self.A_eq @ x + self.b_eq
+    rc = -self.A_ineq @ x + self.b_ineq + s
+    rsz = np.diag(s) @ np.diag(z) @ np.ones(self.A_ineq.shape[0])
+    
+    return rl, ra, rc, rsz
+
+  def __test_alpha(self, alpha, s, z, ds, dz):
+        first = np.min(s + alpha * ds) > 0
+        second = np.min(z + alpha * dz) > 0
+        return first and second
+
+  def __test_convergence(self, tol, rl, ra, rc, rsz):
+    f = np.linalg.norm(rl)
+    s = np.linalg.norm(ra)
+    t = np.linalg.norm(rc)
+    q = np.linalg.norm(rsz)
+    return f < tol and s < tol and t < tol and q < tol * 1e-2
+      
+  def primal_dual_active_set(self, x_0, y_0, z_0, s_0, tol = 1e-6, N_it = 1e3):
+    N_it = int(round(N_it, 0))
+    
+    x = np.array(x_0)
+    y = np.array(y_0)
+    s = np.array(s_0)
+    z = np.array(z_0)
+    
+    if np.all(np.block([z_0, s_0]) > 0):
+      ValueError("s_0 and z_0 must be positive.")
+    
+    x_arr = np.empty(0)
+    x_arr = np.append(x_arr, [x])
+    
+    for i in range(N_it):
+      mu = (s@z)/self.A_ineq.shape[0]
+      sigma = 10**(-i)
+      
+      rl, ra, rc, rsz = self.__get_residuals(x, y, z, s)
+      
+      M, vec = self.__make_lin_system(rl, ra, rc, rsz, s, z, sigma, mu)
+
+      res = np.linalg.lstsq(M, vec, rcond=None)[0]
+      dx, dy, dz, ds = res[:self.N], res[self.N:(self.N + self.A_eq.shape[0])], res[(self.N + self.A_eq.shape[0]):(self.N + self.A_eq.shape[0] + self.A_ineq.shape[0])], res[(self.N + self.A_eq.shape[0] + self.A_ineq.shape[0]):]
+    
+      alpha = 1
+      while not self.__test_alpha(alpha, s, z, ds, dz):
+        alpha = alpha*.9
+      
+      x = x + alpha * dx
+      y = y + alpha * dy
+      z = z + alpha * dz
+      s = s + alpha * ds
+      
+      x_arr = np.append(x_arr, [x])
+
+      if self.__test_convergence(tol, rl, ra, rc, rsz):
+        break
+      
+    return x, np.reshape(x_arr, (-1, self.N))
+  
+  def predictor_corr(self, x_0, y_0, z_0, s_0, tol = 1e-6, N_it = 1e3):
+    N_it = int(round(N_it, 0))
+    
+    x = np.array(x_0)
+    y = np.array(y_0)
+    s = np.array(s_0)
+    z = np.array(z_0)
+    
+    if np.all(np.block([z_0, s_0]) > 0):
+      ValueError("s_0 and z_0 must be positive.")
+      
+    x_arr = np.empty(0)
+    x_arr = np.append(x_arr, [x])
+    
+    for i in range(N_it):
+      
+      rl, ra, rc, rsz = self.__get_residuals(x, y, z, s)
+      
+      M, vec = self.__make_lin_system(rl, ra, rc, rsz, s, z, 0, 0)
+      
+      res = np.linalg.lstsq(M, vec, rcond=None)[0]
+      _, _, dz_aff, ds_aff = res[:self.N], res[self.N:(self.N + self.A_eq.shape[0])], res[(self.N + self.A_eq.shape[0]):(self.N + self.A_eq.shape[0] + self.A_ineq.shape[0])], res[(self.N + self.A_eq.shape[0] + self.A_ineq.shape[0]):]
+      
+      alpha_aff = 1
+      while not self.__test_alpha(alpha_aff, s, z, ds_aff, dz_aff):
+        alpha_aff = alpha_aff*.9
+      
+      mu_aff = (s + alpha_aff * ds_aff) @ (z + alpha_aff * dz_aff) / self.A_ineq.shape[0]
+      mu = (s @ z) / self.A_ineq.shape[0]
+      
+      sigma = (mu_aff / mu)**3
+      
+      rsz_bar = rsz - np.diag(ds_aff) @ np.diag(dz_aff) @ np.ones(self.A_ineq.shape[0])
+      
+      M, vec = self.__make_lin_system(rl, ra, rc, rsz_bar, s, z, sigma, mu)
+      res = np.linalg.lstsq(M, vec, rcond=None)[0]
+      
+      dx, dy, dz, ds = res[:self.N], res[self.N:(self.N + self.A_eq.shape[0])], res[(self.N + self.A_eq.shape[0]):(self.N + self.A_eq.shape[0] + self.A_ineq.shape[0])], res[(self.N + self.A_eq.shape[0] + self.A_ineq.shape[0]):]
+      
+      alpha = 1
+      while not self.__test_alpha(alpha, s, z, ds, dz):
+        alpha = alpha*.9
+      
+      eta = 0.995
+      
+      x = x + eta * alpha * dx
+      y = y + eta * alpha * dy
+      z = z + eta * alpha * dz
+      s = s + eta * alpha * ds
+      
+      x_arr = np.append(x_arr, [x])
+      
+      if self.__test_convergence(tol, rl, ra, rc, rsz):
+        break
+      
+    return x, np.reshape(x_arr, (-1, self.N))
+  
+  def primal_dual_predictor_corr(self, x_0, y_0, z_0, s_0, epsilon = 1e-6):
     x_0 = np.array(x_0)
     y_0 = np.array(y_0)
     z_0 = np.array(z_0)
     s_0 = np.array(s_0)
     
     if np.all(np.block([z_0, s_0]) > 0):
-      ValueError("s0 and z0 must be positive.")
+      ValueError("s_0 and z_0 must be positive.")
+      
     x_arr = np.empty(0)
     x, y, z, s = x_0, y_0, z_0, s_0
+    print(f"s_0 : {np.min(s)}")
     
     mc = z.shape[0]
     
     x_arr = np.append(x_arr, [x])
    
     rl = self.G @ x + self.c - self.A_eq.T @ y - self.A_ineq.T @ z
-    ra = -self.A_eq @ x - self.b_eq
-    rc = -self.A_ineq @ x - self.b_ineq + s
+    ra = -self.A_eq @ x + self.b_eq
+    rc = -self.A_ineq @ x + self.b_ineq + s
     rsz = np.diag(s) @ np.diag(z) @ np.ones(mc)
     mu = (z @ s)/mc
     
     while True:
-      def test_alpha(alpha, ds, dz):
-        first = s + alpha * ds
-        second = z + alpha * dz
-        return np.all(first > 0) and np.all(second > 0)
-        
       G_bar = self.G + self.A_ineq.T @ (np.diag(1/s)@np.diag(z)) @ self.A_ineq
       
       rl_bar = rl - self.A_ineq.T @ (np.diag(1/s) @ np.diag(z)) @ (rc - np.diag(1/z) @ rsz)
       
       M1 = np.block([
         [G_bar, -self.A_eq.T],
-        [self.A_eq, np.zeros((self.A_eq.shape[0], self.A_eq.shape[0]))]
+        [-self.A_eq, np.zeros((self.A_eq.shape[0], self.A_eq.shape[0]))]
       ])
       vec1 = np.block([rl_bar, ra])
       
@@ -380,22 +527,16 @@ class QP:
       
       dz_aff = (np.diag(1/s) @ np.diag(z)) @ (-self.A_ineq @ dx_aff + rc - np.diag(1/z) @ rsz)
       ds_aff = -np.diag(1/z) @ (rsz + np.diag(s) @ dz_aff)
-      
-      # alpha_s_arr = -s/ds_aff
-      # alpha_z_arr = -z/dz_aff
-      
-      # alpha_arr = np.concatenate([alpha_s_arr, alpha_z_arr])
-      # alpha_idx = np.argmin(np.abs(alpha_arr[alpha_arr > 0]))
-      # alpha = alpha_arr[alpha_idx]
+
       alpha = 1
-      while test_alpha(alpha, ds_aff, dz_aff):
-        alpha = -alpha/10
+      while not self.__test_alpha(alpha, s, z, ds_aff, dz_aff):
+        alpha = alpha*.9
       
       
       mu_aff = (z + alpha*dz_aff) @ (s + alpha*ds_aff)/mc
       sigma = (mu_aff/mu)**3
       
-      rsz_bar = rsz + np.diag(ds_aff) @ np.diag(dz_aff) @ np.ones(mc) -sigma*mu * np.ones(mc)
+      rsz_bar = rsz + np.diag(ds_aff) @ np.diag(dz_aff) @ np.ones(mc) - sigma*mu * np.ones(mc)
       
       rl_bar = rl - self.A_ineq.T @ (np.diag(1/s) @ np.diag(z)) @ (rc - np.diag(1/z) @ rsz_bar)
       
@@ -412,15 +553,9 @@ class QP:
       dz = (np.diag(1/s) @ np.diag(z)) @ (-self.A_ineq @ dx + rc - np.diag(1/z) @ rsz_bar)
       ds = (-np.diag(1/z)) @ (rsz_bar + np.diag(s) @ dz)
       
-      # alpha_s_arr = -s/ds      
-      # alpha_z_arr = -z/dz
-      
-      # alpha_arr = np.concatenate([alpha_s_arr, alpha_z_arr])
-      # alpha_idx = np.argmin(np.abs(alpha_arr[alpha_arr > 0]))
-      # alpha = alpha_arr[alpha_idx]
       alpha = 1
-      while test_alpha(alpha, ds, dz):
-        alpha = -alpha/10
+      while not self.__test_alpha(alpha, s, z, ds, dz):
+        alpha = alpha*.9
       
       eta = 0.995
       alpha_bar = eta * alpha
@@ -430,8 +565,8 @@ class QP:
       s = s + alpha_bar * ds
       
       rl = self.G @ x + self.c - self.A_eq.T @ y - self.A_ineq.T @ z
-      ra = -self.A_eq @ x - self.b_eq
-      rc = -self.A_ineq @ x - self.b_ineq + s
+      ra = -self.A_eq @ x + self.b_eq
+      rc = -self.A_ineq @ x + self.b_ineq + s
       rsz = np.diag(s) @ np.diag(z) @ np.ones(mc)
       
       mu = (s @ z)/mc
