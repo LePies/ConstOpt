@@ -37,6 +37,8 @@ class LP:
       self.b_u = np.array(b_u)
     if l is NotImplemented:
       l = np.zeros(c.shape[0])
+    if u is NotImplemented:
+      u = np.inf * np.ones(c.shape[0])
     
     if self.is_eq:
       self.slack_l = 0
@@ -59,15 +61,54 @@ class LP:
       ])
       
       self.A = np.block([
-        [-self.A_eq, self.A_eq, np.zeros((self.A_eq.shape[0],self.slack_l)), np.zeros((self.A_eq.shape[0], self.slack_u))],
-        [-self.A_l, self.A_l, -np.eye(self.slack_l), np.zeros((self.slack_l, self.slack_u))],
-        [-self.A_u, self.A_u, np.zeros((self.slack_u, self.slack_l)), np.eye(self.slack_u)],
+        [
+          -self.A_eq,
+          self.A_eq,
+          np.zeros((self.A_eq.shape[0],self.slack_l)),
+          np.zeros((self.A_eq.shape[0], self.slack_u)),
+          np.zeros((self.A_eq.shape[0], self.n)),
+          np.zeros((self.A_eq.shape[0], self.n))
+        ],
+        [
+          -self.A_l,
+          self.A_l, 
+          -np.eye(self.slack_l), 
+          np.zeros((self.slack_l, self.slack_u)),
+          np.zeros((self.slack_l, self.n)),
+          np.zeros((self.slack_l, self.n))
+        ],
+        [
+          -self.A_u, 
+          self.A_u, 
+          np.zeros((self.slack_u, self.slack_l)), 
+          np.eye(self.slack_u),
+          np.zeros((self.slack_u, self.n)),
+          np.zeros((self.slack_u, self.n))
+        ],
+        [
+          -np.eye(self.n),
+          np.eye(self.n),
+          np.zeros((self.n, self.slack_l)),
+          np.zeros((self.n, self.slack_u)),
+          -np.eye(self.n),
+          np.zeros((self.n, self.n))
+        ],
+        [
+          -np.eye(self.n),
+          np.eye(self.n),
+          np.zeros((self.n, self.slack_l)),
+          np.zeros((self.n, self.slack_u)),
+          np.zeros((self.n, self.n)),
+          np.eye(self.n)
+        ]
       ])
 
       self.b = np.concatenate([
         self.b_eq,
         self.b_l,
         self.b_u,
+        l,
+        
       ])
     
     self.interior_point = self.Interior_point(self)
@@ -94,9 +135,7 @@ class LP:
     
     def one_step_simplex(self, B, steps = 1, ineq_modified = False):
       B = np.array(B)
-      print(ineq_modified, self.parent.is_eq)
       if not ineq_modified and not self.parent.is_eq:
-        print("Hello")
         B = np.concatenate([B, B + self.parent.n])
       
       N = np.delete(np.arange(self.parent.c.shape[0]), B)
@@ -105,6 +144,7 @@ class LP:
       A_N = self.parent.A[:, N]
       c_B = self.parent.c[B]
       c_N = self.parent.c[N]
+      print(A_B.shape, self.parent.b.shape)
       x_B, _, _, _ = np.linalg.lstsq(A_B, self.parent.b)
       print(x_B)
       x_N = np.zeros(len(N))

@@ -271,10 +271,9 @@ class QP:
     I_ = range(self.A_ineq.shape[0])
     
     x_arr = np.append(x_arr, [x])
-    
     for _ in range(int(round(N_it, 0))):
       if self.is_feasible(x):
-        return x
+        return x, np.reshape(x_arr, (-1, self.N))
     _, c_ineq = self.constraints(x)
     r_arr = np.arange(c_ineq.shape[0])[c_ineq < 0]
     r = np.random.choice(r_arr)
