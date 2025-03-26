@@ -499,7 +499,6 @@ class QP:
       
     x_arr = np.empty(0)
     x, y, z, s = x_0, y_0, z_0, s_0
-    print(f"s_0 : {np.min(s)}")
     
     mc = z.shape[0]
     
